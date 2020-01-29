@@ -1,7 +1,7 @@
 ForceSet
 ---
-ForceSet provides an easier way to set the value of a variable when you use reflection.
-
+ForceSet provides an easier way to set the value of a variable. 
+It prevents you from writing a lot of type conversion code.
 ## Example
 ```go
 package main
