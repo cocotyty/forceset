@@ -11,10 +11,30 @@ import (
 	"strings"
 )
 
-func ForceSet(value reflect.Value, i interface{}, opts ...option) error {
-	var opt option
+func Set(dst interface{}, src interface{}, opts ...Option) error {
+	return ForceSet(reflect.ValueOf(dst).Elem(), src, opts...)
+}
+
+func ForceSet(value reflect.Value, i interface{}, opts ...Option) error {
+	var opt SetOption
+	opt.Tag = "json"
 	if len(opts) != 0 {
-		opt = opts[0]
+		for _, fn := range opts {
+			fn(&opt)
+		}
+	}
+	return forceSet(value, i, opt)
+}
+
+func forceSet(value reflect.Value, i interface{}, opt SetOption) error {
+	if i == nil {
+		return nil
+	}
+	for value.Kind() == reflect.Ptr {
+		if value.IsNil() {
+			value.Set(reflect.New(value.Type().Elem()))
+		}
+		value = value.Elem()
 	}
 	var bErr error
 	switch value.Kind() {
@@ -66,27 +86,27 @@ func ForceSet(value reflect.Value, i interface{}, opts ...option) error {
 			}
 		}
 	}
-	o := reflect.ValueOf(i)
-	if o.Type() == value.Type() {
-		value.Set(o)
+	iv := reflect.ValueOf(i)
+	if iv.Type() == value.Type() {
+		value.Set(iv)
 		return nil
 	}
 
 	if value.Type().Kind() == reflect.Interface {
-		if o.Type().Implements(value.Type()) {
-			value.Set(o)
+		if iv.Type().Implements(value.Type()) {
+			value.Set(iv)
 			return nil
 		}
 	}
 
-	if o.Type().ConvertibleTo(value.Type()) {
-		converted := o.Convert(value.Type())
+	if iv.Type().ConvertibleTo(value.Type()) {
+		converted := iv.Convert(value.Type())
 		value.Set(converted)
 		return nil
 	}
 
-	if o.Type().AssignableTo(value.Type()) {
-		value.Set(o)
+	if iv.Type().AssignableTo(value.Type()) {
+		value.Set(iv)
 		return nil
 	}
 
@@ -94,14 +114,20 @@ func ForceSet(value reflect.Value, i interface{}, opts ...option) error {
 		return bErr
 	}
 
-	if value.Kind() == reflect.Slice {
-		iv := reflect.ValueOf(i)
+	switch value.Kind() {
+	case reflect.Slice:
+		for iv.Kind() == reflect.Ptr {
+			if iv.IsNil() {
+				return nil
+			}
+			iv = iv.Elem()
+		}
 		if iv.Type().Kind() == reflect.Slice || iv.Type().Kind() == reflect.Array {
 			proxyValue := reflect.MakeSlice(value.Type(), iv.Len(), iv.Len())
 			size := iv.Len()
 			for n := 0; n < size; n++ {
 				elm := iv.Index(n)
-				err := ForceSet(proxyValue.Index(n), elm.Interface(), opt)
+				err := forceSet(proxyValue.Index(n), elm.Interface(), opt)
 				if err != nil {
 					return err
 				}
@@ -109,34 +135,363 @@ func ForceSet(value reflect.Value, i interface{}, opts ...option) error {
 			value.Set(proxyValue)
 			return nil
 		}
+		switch iv.Type().Kind() {
+		case reflect.Map:
+			return map2slice(value, iv, opt)
+		}
+	case reflect.Struct:
+		for iv.Kind() == reflect.Ptr {
+			if iv.IsNil() {
+				return nil
+			}
+			iv = iv.Elem()
+		}
+		if iv.Type() == value.Type() {
+			value.Set(iv)
+			return nil
+		}
+		if iv.Type().ConvertibleTo(value.Type()) {
+			converted := iv.Convert(value.Type())
+			value.Set(converted)
+			return nil
+		}
+
+		if iv.Type().AssignableTo(value.Type()) {
+			value.Set(iv)
+			return nil
+		}
+		switch iv.Kind() {
+		case reflect.Struct:
+			return struct2Struct(value, iv, opt)
+		case reflect.Map:
+			return map2Struct(value, iv, opt)
+			//case reflect.String:
+			//
+		}
+	case reflect.Map:
+		for iv.Kind() == reflect.Ptr {
+			if iv.IsNil() {
+				return nil
+			}
+			iv = iv.Elem()
+		}
+		if iv.Type() == value.Type() {
+			value.Set(iv)
+			return nil
+		}
+		if iv.Type().ConvertibleTo(value.Type()) {
+			converted := iv.Convert(value.Type())
+			value.Set(converted)
+			return nil
+		}
+
+		if iv.Type().AssignableTo(value.Type()) {
+			value.Set(iv)
+			return nil
+		}
+		switch iv.Kind() {
+		case reflect.Struct:
+			return struct2map(value, iv, opt)
+		case reflect.Map:
+			return map2map(value, iv, opt)
+
+			//case reflect.String:
+			//
+		}
 	}
-	return errors.New("force set type(" + o.Type().String() + ") into type(" + value.Type().String() + ") failed")
+
+	return errors.New("force set type(" + iv.Type().String() + ") into type(" + value.Type().String() + ") failed")
 }
 
-type BytesOption int8
+var empty = reflect.Value{}
 
-const (
-	AsString BytesOption = iota
-	Base64
-	Binary
-)
-
-type option struct {
-	BytesOption BytesOption
+func struct2Struct(dst, src reflect.Value, opt SetOption) error {
+	num := dst.NumField()
+	for i := 0; i < num; i++ {
+		df := dst.Field(i)
+		dt := dst.Type().Field(i)
+		if dt.Anonymous {
+			err := struct2Struct(df, src, opt)
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		if dt.PkgPath != "" {
+			continue
+		}
+		sf := src.FieldByName(dt.Name)
+		if sf == empty {
+			continue
+		}
+		if dt.Type == sf.Type() {
+			df.Set(sf)
+			continue
+		}
+		err := setPtr(df, sf, opt)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func toBytes(i interface{}, opt option) ([]byte, error) {
+func setPtr(dst reflect.Value, src reflect.Value, opt SetOption) error {
+	typ := dst.Type()
+	val := dst
+	for typ.Kind() == reflect.Ptr {
+		typ = typ.Elem()
+		v := reflect.New(typ)
+		val.Set(v)
+		val = val.Elem()
+	}
+	return forceSet(val, src.Interface(), opt)
+}
+
+// dst struct
+// src map
+func map2Struct(dst, src reflect.Value, opt SetOption) error {
+	srcType := src.Type()
+	kt := srcType.Key()
+	if kt.Kind() != reflect.String {
+		return errors.New("map key type must be string")
+	}
+	fn := dst.NumField()
+	dstType := dst.Type()
+	for i := 0; i < fn; i++ {
+		sf := dst.Field(i)
+		st := dstType.Field(i)
+		typ := st.Type
+		fieldValue := sf
+		for typ.Kind() == reflect.Ptr {
+			value := reflect.New(fieldValue.Type().Elem())
+			fieldValue.Set(value)
+			fieldValue = fieldValue.Elem()
+			typ = fieldValue.Type()
+		}
+		if st.Anonymous {
+			if fieldValue.Kind() == reflect.Struct {
+				err := map2Struct(fieldValue, src, opt)
+				if err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if st.PkgPath != "" {
+			continue
+		}
+		tag := st.Tag.Get(opt.Tag)
+		names := strings.Split(strings.Split(tag, ";")[0], " ")
+		if len(names) == 1 && names[0] == "" {
+			names = []string{st.Name}
+		}
+
+		var value reflect.Value
+		for _, name := range names {
+			value = src.MapIndex(reflect.ValueOf(name))
+			if value != empty {
+				break
+			}
+		}
+		if value == empty {
+			continue
+		}
+		err := forceSet(fieldValue, value.Interface(), opt)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// dst map
+// src struct
+func struct2map(dst, src reflect.Value, opt SetOption) error {
+	valueType := dst.Type().Elem()
+	keyType := dst.Type().Key()
+	numField := src.NumField()
+	srcType := src.Type()
+	for i := 0; i < numField; i++ {
+		field := src.Field(i)
+		structField := srcType.Field(i)
+		if structField.Anonymous {
+			f := field
+			for f.Kind() == reflect.Ptr {
+				if f.IsNil() {
+					break
+				}
+				f = field.Elem()
+			}
+			err := struct2map(dst, f, opt)
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		if structField.PkgPath != "" {
+			continue
+		}
+		root, val := ptrValue(valueType)
+		err := forceSet(val, field.Interface(), opt)
+		if err != nil {
+			return err
+		}
+		keyName := strings.Split(strings.Split(structField.Tag.Get(opt.Tag), ";")[0], " ")[0]
+		if keyName == "" {
+			keyName = structField.Name
+		}
+		k := reflect.New(keyType)
+		err = forceSet(k.Elem(), keyName, opt)
+		if err != nil {
+			return err
+		}
+		dst.SetMapIndex(k.Elem(), root.Elem())
+	}
+	return nil
+}
+
+func ptrValue(typ reflect.Type) (root reflect.Value, val reflect.Value) {
+	root = reflect.New(typ)
+
+	val = root.Elem()
+
+	for typ.Kind() == reflect.Ptr {
+		v := reflect.New(typ.Elem())
+		val.Set(v)
+		typ = typ.Elem()
+		val = val.Elem()
+	}
+	return root, val
+}
+
+func map2map(dst, src reflect.Value, opt SetOption) error {
+	valueType := dst.Type().Elem()
+	keyType := dst.Type().Key()
+	iter := src.MapRange()
+	for iter.Next() {
+		key := iter.Key()
+		val := iter.Value()
+		k, kr := ptrValue(keyType)
+		err := forceSet(kr, key.Interface(), opt)
+		if err != nil {
+			return err
+		}
+		v, vr := ptrValue(valueType)
+		err = forceSet(vr, val.Interface(), opt)
+		if err != nil {
+			return err
+		}
+		dst.SetMapIndex(k.Elem(), v.Elem())
+	}
+	return nil
+}
+
+// dst slice
+// src map
+func map2slice(dst, src reflect.Value, opt SetOption) error {
+	if opt.MapToSliceOption == Pairs {
+		return map2slice2(dst, src, opt)
+	}
+	valueType := dst.Type().Elem()
+
+	keys := src.MapKeys()
+	if len(keys) == 0 {
+		return nil
+	}
+	var max int
+	for _, key := range keys {
+		var k int
+		err := forceSet(reflect.ValueOf(&k), key.Interface(), opt)
+		if err != nil {
+			return err
+		}
+		if k > max {
+			max = k
+		}
+	}
+
+	var l = max + 1
+	slice := reflect.MakeSlice(dst.Type(), l, l)
+
+	iter := src.MapRange()
+	for iter.Next() {
+		key := iter.Key()
+		val := iter.Value()
+		var k int
+		err := forceSet(reflect.ValueOf(&k), key.Interface(), opt)
+		if err != nil {
+			return err
+		}
+		v, vr := ptrValue(valueType)
+		err = forceSet(vr, val.Interface(), opt)
+		if err != nil {
+			return err
+		}
+		slice.Index(k).Set(v.Elem())
+	}
+	dst.Set(slice)
+	return nil
+}
+
+// dst []pair
+// src map[key]val
+func map2slice2(dst, src reflect.Value, opt SetOption) error {
+	elmType := dst.Type().Elem()
+	elmStructType := elmType
+	for elmStructType.Kind() == reflect.Ptr {
+		elmStructType = elmStructType.Elem()
+	}
+	if elmStructType.Kind() != reflect.Struct {
+		return errors.New("cannot convert map to slice of pair because slice's element type is not struct:" + elmType.String())
+	}
+	if elmStructType.NumField() < 2 {
+		return errors.New("cannot convert map to slice of pair because slice's element numField less than 2:" + elmType.String())
+	}
+	kf := elmStructType.Field(0)
+	if kf.Anonymous || kf.PkgPath != "" {
+		return errors.New("pair struct invalid")
+	}
+	vf := elmStructType.Field(1)
+	if vf.Anonymous || vf.PkgPath != "" {
+		return errors.New("pair struct invalid")
+	}
+	l := src.Len()
+	slice := reflect.MakeSlice(dst.Type(), l, l)
+	iter := src.MapRange()
+	var i int
+	for iter.Next() {
+		k := iter.Key()
+		v := iter.Value()
+
+		root, val := ptrValue(elmType)
+		err := forceSet(val.Field(0), k.Interface(), opt)
+		if err != nil {
+			return err
+		}
+		err = forceSet(val.Field(1), v.Interface(), opt)
+		if err != nil {
+			return err
+		}
+		slice.Index(i).Set(root.Elem())
+		i++
+	}
+	dst.Set(slice)
+	return nil
+}
+
+func toBytes(i interface{}, opt SetOption) ([]byte, error) {
 	switch o := i.(type) {
 	case []byte:
 		return o, nil
 	case string:
 		switch opt.BytesOption {
 		case Base64:
-			bytes, err := base64.StdEncoding.DecodeString(o)
+			data, err := base64.StdEncoding.DecodeString(o)
 			if err != nil {
 				return nil, err
 			}
-			return bytes, nil
+			return data, nil
 		default:
 			return []byte(o), nil
 		}
@@ -153,7 +508,7 @@ func toBytes(i interface{}, opt option) ([]byte, error) {
 	return nil, errors.New("type (" + reflect.TypeOf(i).String() + ") to []byte invalid")
 }
 
-func toBool(i interface{}, opt option) (bool, error) {
+func toBool(i interface{}, opt SetOption) (bool, error) {
 	if i == nil {
 		return false, nil
 	}
@@ -200,7 +555,7 @@ func toBool(i interface{}, opt option) (bool, error) {
 	return false, errors.New("type (" + reflect.TypeOf(i).String() + ") to bool invalid")
 }
 
-func toInt(i interface{}, opt option) (int64, error) {
+func toInt(i interface{}, opt SetOption) (int64, error) {
 	switch o := i.(type) {
 	case int:
 		return int64(o), nil
@@ -248,7 +603,7 @@ func toInt(i interface{}, opt option) (int64, error) {
 	return 0, errors.New("type (" + reflect.TypeOf(i).String() + ") to int invalid")
 }
 
-func toFloat(i interface{}, opt option) (float64, error) {
+func toFloat(i interface{}, opt SetOption) (float64, error) {
 	switch o := i.(type) {
 	case int:
 		return float64(o), nil
@@ -291,7 +646,7 @@ func toFloat(i interface{}, opt option) (float64, error) {
 	return 0, errors.New("type (" + reflect.TypeOf(i).String() + ") to int invalid")
 }
 
-func toUint(i interface{}, opt option) (uint64, error) {
+func toUint(i interface{}, opt SetOption) (uint64, error) {
 	switch o := i.(type) {
 
 	case int:
@@ -340,7 +695,7 @@ func toUint(i interface{}, opt option) (uint64, error) {
 	return 0, errors.New("type (" + reflect.TypeOf(i).String() + ") to int invalid")
 }
 
-func toString(i interface{}, opt option) string {
+func toString(i interface{}, opt SetOption) string {
 	switch o := i.(type) {
 	case string:
 		return o
