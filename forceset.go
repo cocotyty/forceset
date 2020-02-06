@@ -138,6 +138,8 @@ func forceSet(value reflect.Value, i interface{}, opt SetOption) error {
 		switch iv.Type().Kind() {
 		case reflect.Map:
 			return map2slice(value, iv, opt)
+		case reflect.Struct:
+			return struct2slice(value, iv, opt)
 		}
 	case reflect.Struct:
 		for iv.Kind() == reflect.Ptr {
@@ -165,7 +167,6 @@ func forceSet(value reflect.Value, i interface{}, opt SetOption) error {
 			return struct2Struct(value, iv, opt)
 		case reflect.Map:
 			return map2Struct(value, iv, opt)
-			//case reflect.String:
 			//
 		}
 	case reflect.Map:
@@ -384,6 +385,45 @@ func map2map(dst, src reflect.Value, opt SetOption) error {
 		}
 		dst.SetMapIndex(k.Elem(), v.Elem())
 	}
+	return nil
+}
+
+// dst slice
+// src struct
+func struct2slice(dst, src reflect.Value, opt SetOption) error {
+	itemType := dst.Type().Elem()
+	n := src.NumField()
+	slice := reflect.MakeSlice(dst.Type(), 0, n)
+	srcType := src.Type()
+	for i := 0; i < n; i++ {
+		field := src.Field(i)
+		structField := srcType.Field(i)
+		if structField.Anonymous {
+			for field.Kind() == reflect.Ptr {
+				if field.IsNil() {
+					break
+				}
+				field = field.Elem()
+			}
+			if field.Type().Kind() == reflect.Struct {
+				err := struct2slice(dst, field, opt)
+				if err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if structField.PkgPath != "" {
+			continue
+		}
+		value := reflect.New(itemType)
+		err := setPtr(value.Elem(), field, opt)
+		if err != nil {
+			return nil
+		}
+		slice = reflect.Append(slice, value.Elem())
+	}
+	dst.Set(slice)
 	return nil
 }
 

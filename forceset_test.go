@@ -173,6 +173,22 @@ func TestSetSliceFromMap2(t *testing.T) {
 	}
 }
 
+func TestSetSliceFromStruct(t *testing.T) {
+	var slice []string
+	var addr = Address2{
+		Code: 1,
+		Text: "sometext",
+	}
+	err := Set(&slice, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := []string{"1", "sometext"}
+	if !reflect.DeepEqual(expected, slice) {
+		t.Fatal(slice)
+	}
+}
+
 type RoleInfo struct {
 	Role Role
 }
