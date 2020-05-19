@@ -17,16 +17,17 @@ func Set(dst interface{}, src interface{}, opts ...Option) error {
 
 func ForceSet(value reflect.Value, i interface{}, opts ...Option) error {
 	var opt SetOption
+	opt.Mappers = map[MapperType]Mapper{}
 	opt.Tag = "json"
 	if len(opts) != 0 {
 		for _, fn := range opts {
 			fn(&opt)
 		}
 	}
-	return forceSet(value, i, opt)
+	return forceSet(value, i, opt, "")
 }
 
-func forceSet(value reflect.Value, i interface{}, opt SetOption) error {
+func forceSet(value reflect.Value, i interface{}, opt SetOption, tag string) error {
 	if i == nil {
 		return nil
 	}
@@ -37,6 +38,10 @@ func forceSet(value reflect.Value, i interface{}, opt SetOption) error {
 		value = value.Elem()
 	}
 	var bErr error
+	iv := reflect.ValueOf(i)
+	if m, ok := opt.Mappers[MapperType{value.Type(), iv.Type()}]; ok {
+		return m(value, iv, tag)
+	}
 	switch value.Kind() {
 	case reflect.String:
 		value.SetString(toString(i, opt))
@@ -86,12 +91,10 @@ func forceSet(value reflect.Value, i interface{}, opt SetOption) error {
 			}
 		}
 	}
-	iv := reflect.ValueOf(i)
 	if iv.Type() == value.Type() {
 		value.Set(iv)
 		return nil
 	}
-
 	if value.Type().Kind() == reflect.Interface {
 		if iv.Type().Implements(value.Type()) {
 			value.Set(iv)
@@ -127,7 +130,7 @@ func forceSet(value reflect.Value, i interface{}, opt SetOption) error {
 			size := iv.Len()
 			for n := 0; n < size; n++ {
 				elm := iv.Index(n)
-				err := forceSet(proxyValue.Index(n), elm.Interface(), opt)
+				err := forceSet(proxyValue.Index(n), elm.Interface(), opt, "")
 				if err != nil {
 					return err
 				}
@@ -246,7 +249,7 @@ func setPtr(dst reflect.Value, src reflect.Value, opt SetOption) error {
 		val.Set(v)
 		val = val.Elem()
 	}
-	return forceSet(val, src.Interface(), opt)
+	return forceSet(val, src.Interface(), opt, "")
 }
 
 // dst struct
@@ -298,7 +301,7 @@ func map2Struct(dst, src reflect.Value, opt SetOption) error {
 		if value == empty {
 			continue
 		}
-		err := forceSet(fieldValue, value.Interface(), opt)
+		err := forceSet(fieldValue, value.Interface(), opt, tag)
 		if err != nil {
 			return err
 		}
@@ -333,17 +336,18 @@ func struct2map(dst, src reflect.Value, opt SetOption) error {
 		if structField.PkgPath != "" {
 			continue
 		}
+		var tag = structField.Tag.Get(opt.Tag)
 		root, val := ptrValue(valueType)
-		err := forceSet(val, field.Interface(), opt)
+		err := forceSet(val, field.Interface(), opt, tag)
 		if err != nil {
 			return err
 		}
-		keyName := strings.Split(strings.Split(structField.Tag.Get(opt.Tag), ";")[0], " ")[0]
+		keyName := strings.Split(strings.Split(tag, ";")[0], " ")[0]
 		if keyName == "" {
 			keyName = structField.Name
 		}
 		k := reflect.New(keyType)
-		err = forceSet(k.Elem(), keyName, opt)
+		err = forceSet(k.Elem(), keyName, opt, tag)
 		if err != nil {
 			return err
 		}
@@ -374,12 +378,12 @@ func map2map(dst, src reflect.Value, opt SetOption) error {
 		key := iter.Key()
 		val := iter.Value()
 		k, kr := ptrValue(keyType)
-		err := forceSet(kr, key.Interface(), opt)
+		err := forceSet(kr, key.Interface(), opt, "")
 		if err != nil {
 			return err
 		}
 		v, vr := ptrValue(valueType)
-		err = forceSet(vr, val.Interface(), opt)
+		err = forceSet(vr, val.Interface(), opt, "")
 		if err != nil {
 			return err
 		}
@@ -442,7 +446,7 @@ func map2slice(dst, src reflect.Value, opt SetOption) error {
 	var max int
 	for _, key := range keys {
 		var k int
-		err := forceSet(reflect.ValueOf(&k), key.Interface(), opt)
+		err := forceSet(reflect.ValueOf(&k), key.Interface(), opt, "")
 		if err != nil {
 			return err
 		}
@@ -459,12 +463,12 @@ func map2slice(dst, src reflect.Value, opt SetOption) error {
 		key := iter.Key()
 		val := iter.Value()
 		var k int
-		err := forceSet(reflect.ValueOf(&k), key.Interface(), opt)
+		err := forceSet(reflect.ValueOf(&k), key.Interface(), opt, "")
 		if err != nil {
 			return err
 		}
 		v, vr := ptrValue(valueType)
-		err = forceSet(vr, val.Interface(), opt)
+		err = forceSet(vr, val.Interface(), opt, "")
 		if err != nil {
 			return err
 		}
@@ -505,11 +509,11 @@ func map2slice2(dst, src reflect.Value, opt SetOption) error {
 		v := iter.Value()
 
 		root, val := ptrValue(elmType)
-		err := forceSet(val.Field(0), k.Interface(), opt)
+		err := forceSet(val.Field(0), k.Interface(), opt, "")
 		if err != nil {
 			return err
 		}
-		err = forceSet(val.Field(1), v.Interface(), opt)
+		err = forceSet(val.Field(1), v.Interface(), opt, "")
 		if err != nil {
 			return err
 		}

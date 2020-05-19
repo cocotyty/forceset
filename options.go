@@ -1,5 +1,7 @@
 package forceset
 
+import "reflect"
+
 type BytesOption uint8
 
 const (
@@ -19,6 +21,14 @@ type SetOption struct {
 	BytesOption      BytesOption
 	Tag              string
 	MapToSliceOption MapToSliceOption
+	Mappers          map[MapperType]Mapper
+}
+
+type Mapper func(dst reflect.Value, src reflect.Value, tag string) error
+
+type MapperType struct {
+	Destination reflect.Type
+	Source      reflect.Type
 }
 
 type Option func(opt *SetOption)

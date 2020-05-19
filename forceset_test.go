@@ -2,7 +2,9 @@ package forceset
 
 import (
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
 
 type x int
@@ -200,3 +202,48 @@ type Role interface {
 type Admin struct{}
 
 func (a *Admin) Name() string { return "admin" }
+
+func TestSetTime(t *testing.T) {
+	type Data struct {
+		Time *time.Time `json:"time;format:2006-01-02 15:04:05"`
+	}
+	var expect = "2020-05-19 16:20:17"
+	var format = "2006-01-02 15:04:05"
+
+	var data = map[string]interface{}{
+		"time": expect,
+	}
+	var d Data
+	err := Set(&d, data, func(opt *SetOption) {
+		opt.Tag = "json"
+		opt.Mappers[MapperType{
+			Destination: reflect.TypeOf(time.Time{}),
+			Source:      reflect.TypeOf(""),
+		}] = func(dst reflect.Value, src reflect.Value, tag string) error {
+			lines := strings.Split(tag, ";")
+			var fmt string
+			for _, line := range lines {
+				if strings.HasPrefix(line, "format:") {
+					fmt = line[len("format:"):]
+					break
+				}
+			}
+			if fmt == "" {
+				fmt = time.RFC3339
+			}
+			t.Log(fmt)
+			parse, err := time.Parse(fmt, src.Interface().(string))
+			if err != nil {
+				return err
+			}
+			dst.Set(reflect.ValueOf(parse))
+			return nil
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Time == nil || d.Time.Format(format) != expect {
+		t.Fatal("expected :", expect, "got:", d.Time.Format(format))
+	}
+}
