@@ -169,7 +169,8 @@ func forceSet(value reflect.Value, i interface{}, opt SetOption, tag string) err
 		case reflect.Struct:
 			return struct2Struct(value, iv, opt)
 		case reflect.Map:
-			return map2Struct(value, iv, opt)
+			_, err := map2Struct(value, iv, opt)
+			return err
 			//
 		}
 	case reflect.Map:
@@ -254,31 +255,44 @@ func setPtr(dst reflect.Value, src reflect.Value, opt SetOption) error {
 
 // dst struct
 // src map
-func map2Struct(dst, src reflect.Value, opt SetOption) error {
+func map2Struct(dst, src reflect.Value, opt SetOption) (count int, err error) {
 	srcType := src.Type()
 	kt := srcType.Key()
 	if kt.Kind() != reflect.String {
-		return errors.New("map key type must be string")
+		return 0, errors.New("map key type must be string")
 	}
 	fn := dst.NumField()
 	dstType := dst.Type()
 	for i := 0; i < fn; i++ {
 		sf := dst.Field(i)
 		st := dstType.Field(i)
-		typ := st.Type
 		fieldValue := sf
-		for typ.Kind() == reflect.Ptr {
-			value := reflect.New(fieldValue.Type().Elem())
-			fieldValue.Set(value)
-			fieldValue = fieldValue.Elem()
-			typ = fieldValue.Type()
-		}
 		if st.Anonymous {
-			if fieldValue.Kind() == reflect.Struct {
-				err := map2Struct(fieldValue, src, opt)
-				if err != nil {
-					return err
+			typ := st.Type
+			var tempValue reflect.Value
+			var rootValue reflect.Value
+			for typ.Kind() == reflect.Ptr {
+				value := reflect.New(typ.Elem())
+				if rootValue == empty {
+					rootValue = value
+					tempValue = rootValue.Elem()
+					typ = tempValue.Type()
+					continue
 				}
+				tempValue.Set(value)
+				tempValue = tempValue.Elem()
+				typ = tempValue.Type()
+			}
+			if tempValue.Kind() == reflect.Struct {
+				cnt, err := map2Struct(tempValue, src, opt)
+				if err != nil {
+					return 0, err
+				}
+				if cnt == 0 {
+					continue
+				}
+				count++
+				fieldValue.Set(rootValue)
 			}
 			continue
 		}
@@ -303,10 +317,11 @@ func map2Struct(dst, src reflect.Value, opt SetOption) error {
 		}
 		err := forceSet(fieldValue, value.Interface(), opt, tag)
 		if err != nil {
-			return err
+			return 0, err
 		}
+		count++
 	}
-	return nil
+	return count, nil
 }
 
 // dst map

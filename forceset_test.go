@@ -12,7 +12,6 @@ type x int
 func TestForceSetAlias(t *testing.T) {
 	var i int = 0
 	v := reflect.ValueOf(&i)
-
 	err := ForceSet(v.Elem(), x(1))
 	if err != nil {
 		t.Fatal(err)
@@ -101,8 +100,47 @@ func TestSetStructFromMap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("%#v", s)
-	t.Log(***s.Text)
+	if ***s.Text != "1" || s.Code != 2 {
+		t.Fatalf("%#v", s)
+	}
+}
+
+type Address3 struct {
+	*Address
+}
+
+func TestSetStructFromMap2(t *testing.T) {
+	obj := map[string]interface{}{
+	}
+	var s = &Address3{}
+	err := Set(s, obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Address != nil {
+		t.Fatal("should be nil")
+	}
+}
+
+type Address4 struct {
+	*Address
+	Name string
+}
+
+func TestSetStructFromMap3(t *testing.T) {
+	obj := map[string]interface{}{
+		"TEXT": 1,
+		"Code": "2",
+		"Name": "name",
+	}
+	var s = &Address4{}
+	err := Set(s, obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Address == nil || ***s.Text != "1" || s.Code != 2 || s.Name != "name" {
+		t.Fatalf("%#v", s)
+	}
 }
 
 func TestSetMapFromStruct(t *testing.T) {
@@ -206,6 +244,7 @@ func (a *Admin) Name() string { return "admin" }
 func TestSetTime(t *testing.T) {
 	type Data struct {
 		Time *time.Time `json:"time;format:2006-01-02 15:04:05"`
+		Next *time.Time
 	}
 	var expect = "2020-05-19 16:20:17"
 	var format = "2006-01-02 15:04:05"
@@ -245,5 +284,8 @@ func TestSetTime(t *testing.T) {
 	}
 	if d.Time == nil || d.Time.Format(format) != expect {
 		t.Fatal("expected :", expect, "got:", d.Time.Format(format))
+	}
+	if d.Next != nil {
+		t.Fatal("expected nil got:", d.Next)
 	}
 }
