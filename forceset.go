@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -637,7 +638,6 @@ func toInt(i interface{}, opt SetOption) (int64, error) {
 		return int64(o), nil
 	case uint64:
 		return int64(o), nil
-
 	case []byte:
 		switch opt.BytesOption {
 		case AsString:
@@ -658,6 +658,8 @@ func toInt(i interface{}, opt SetOption) (int64, error) {
 		return int64(o), nil
 	case float32:
 		return int64(o), nil
+	case json.Number:
+		return o.Int64()
 	}
 	return 0, errors.New("type (" + reflect.TypeOf(i).String() + ") to int invalid")
 }
@@ -701,6 +703,8 @@ func toFloat(i interface{}, opt SetOption) (float64, error) {
 		return o, nil
 	case float32:
 		return float64(o), nil
+	case json.Number:
+		return o.Float64()
 	}
 	return 0, errors.New("type (" + reflect.TypeOf(i).String() + ") to int invalid")
 }
@@ -750,6 +754,9 @@ func toUint(i interface{}, opt SetOption) (uint64, error) {
 		return uint64(o), nil
 	case float32:
 		return uint64(o), nil
+	case json.Number:
+		ii, err := o.Int64()
+		return uint64(ii), err
 	}
 	return 0, errors.New("type (" + reflect.TypeOf(i).String() + ") to int invalid")
 }
