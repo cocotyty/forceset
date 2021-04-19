@@ -22,6 +22,7 @@ type SetOption struct {
 	Tag              string
 	MapToSliceOption MapToSliceOption
 	Mappers          map[MapperType]Mapper
+	Decoder          func([]byte, interface{}) error
 }
 
 type Mapper func(dst reflect.Value, src reflect.Value, tag string) error

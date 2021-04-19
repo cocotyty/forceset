@@ -20,6 +20,7 @@ func ForceSet(value reflect.Value, i interface{}, opts ...Option) error {
 	var opt SetOption
 	opt.Mappers = map[MapperType]Mapper{}
 	opt.Tag = "json"
+	opt.Decoder = json.Unmarshal
 	if len(opts) != 0 {
 		for _, fn := range opts {
 			fn(&opt)
@@ -172,7 +173,14 @@ func forceSet(value reflect.Value, i interface{}, opt SetOption, tag string) err
 		case reflect.Map:
 			_, err := map2Struct(value, iv, opt)
 			return err
-			//
+		case reflect.String:
+			if opt.Decoder != nil {
+				return decodeStruct(value, iv, opt)
+			}
+		case reflect.Slice:
+			if opt.Decoder != nil && iv.Type().Elem().Kind() == reflect.Uint8 {
+				return decodeStruct(value, iv, opt)
+			}
 		}
 	case reflect.Map:
 		for iv.Kind() == reflect.Ptr {
@@ -210,6 +218,16 @@ func forceSet(value reflect.Value, i interface{}, opt SetOption, tag string) err
 }
 
 var empty = reflect.Value{}
+
+func decodeStruct(dst, src reflect.Value, opt SetOption) error {
+	if src.Kind() == reflect.String {
+		data := src.Convert(reflect.ValueOf(``).Type()).Interface().(string)
+		return opt.Decoder([]byte(data), dst.Addr().Interface())
+
+	}
+	data := src.Convert(reflect.ValueOf([]byte(``)).Type()).Interface().([]byte)
+	return opt.Decoder(data, dst.Addr().Interface())
+}
 
 func struct2Struct(dst, src reflect.Value, opt SetOption) error {
 	num := dst.NumField()

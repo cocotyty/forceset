@@ -55,6 +55,19 @@ func TestForceSetStruct(t *testing.T) {
 	}
 }
 
+func TestForceSetStructFromJSON(t *testing.T) {
+	var i User
+	v := reflect.ValueOf(&i)
+
+	err := ForceSet(v.Elem(), []byte(`{"Name":"Peter"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i.Name != "Peter" {
+		t.Fatal(i)
+	}
+}
+
 func TestForceSetInterface(t *testing.T) {
 	var i RoleInfo
 	v := reflect.ValueOf(&i)
@@ -110,8 +123,7 @@ type Address3 struct {
 }
 
 func TestSetStructFromMap2(t *testing.T) {
-	obj := map[string]interface{}{
-	}
+	obj := map[string]interface{}{}
 	var s = &Address3{}
 	err := Set(s, obj)
 	if err != nil {
