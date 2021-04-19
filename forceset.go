@@ -173,14 +173,6 @@ func forceSet(value reflect.Value, i interface{}, opt SetOption, tag string) err
 		case reflect.Map:
 			_, err := map2Struct(value, iv, opt)
 			return err
-		case reflect.String:
-			if opt.Decoder != nil {
-				return decodeStruct(value, iv, opt)
-			}
-		case reflect.Slice:
-			if opt.Decoder != nil && iv.Type().Elem().Kind() == reflect.Uint8 {
-				return decodeStruct(value, iv, opt)
-			}
 		}
 	case reflect.Map:
 		for iv.Kind() == reflect.Ptr {
@@ -213,13 +205,22 @@ func forceSet(value reflect.Value, i interface{}, opt SetOption, tag string) err
 			//
 		}
 	}
-
+	if opt.Decoder != nil {
+		switch iv.Kind() {
+		case reflect.String:
+			return tryUseDecoder(value, iv, opt)
+		case reflect.Slice:
+			if iv.Type().Elem().Kind() == reflect.Uint8 {
+				return tryUseDecoder(value, iv, opt)
+			}
+		}
+	}
 	return errors.New("force set type(" + iv.Type().String() + ") into type(" + value.Type().String() + ") failed")
 }
 
 var empty = reflect.Value{}
 
-func decodeStruct(dst, src reflect.Value, opt SetOption) error {
+func tryUseDecoder(dst, src reflect.Value, opt SetOption) error {
 	if src.Kind() == reflect.String {
 		data := src.Convert(reflect.ValueOf(``).Type()).Interface().(string)
 		return opt.Decoder([]byte(data), dst.Addr().Interface())

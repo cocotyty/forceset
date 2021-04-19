@@ -1,6 +1,7 @@
 package forceset
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -55,16 +56,21 @@ func TestForceSetStruct(t *testing.T) {
 	}
 }
 
-func TestForceSetStructFromJSON(t *testing.T) {
+func TestForceSetFromJSON(t *testing.T) {
 	var i User
 	v := reflect.ValueOf(&i)
 
-	err := ForceSet(v.Elem(), []byte(`{"Name":"Peter"}`))
+	err := ForceSet(v.Elem(), json.RawMessage(`{"Name":"Peter"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if i.Name != "Peter" {
 		t.Fatal(i)
+	}
+	m := map[string]interface{}{}
+	Set(&m, json.RawMessage(`{"Name":"Peter"}`))
+	if m["Name"] != "Peter" {
+		t.Fatal(m)
 	}
 }
 
